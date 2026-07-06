@@ -182,6 +182,8 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   document.getElementById("btnExportJSON").addEventListener("click", exportJSON);
+  document.getElementById("btnExportExcel").addEventListener("click", exportExcel);
+  document.getElementById("btnExportWord").addEventListener("click", exportWordReport);
   document.getElementById("btnExportCSVGaps").addEventListener("click", exportGapCSV);
   document.getElementById("btnExportCSVActions").addEventListener("click", exportActionCSV);
   document.getElementById("btnPrint").addEventListener("click", () => window.print());
@@ -474,6 +476,165 @@ function downloadBlob(content, filename, type) {
 
 function exportJSON() {
   downloadBlob(JSON.stringify(state, null, 2), "hse-gap-analysis-" + dateStamp() + ".json", "application/json");
+}
+
+function exportExcel() {
+  if (typeof XLSX === "undefined") {
+    alert("The Excel export library didn't load (check your internet connection) — please try again, or use the CSV export instead.");
+    return;
+  }
+  const active = getActiveFrameworks();
+  const wb = XLSX.utils.book_new();
+
+  // --- Summary sheet ---
+  const overall = computeStats(null);
+  const summaryRows = [
+    ["HSE Gap Analysis Report"],
+    [],
+    ["Project / Site", state.meta.project || ""],
+    ["Assessor", state.meta.assessor || ""],
+    ["Assessment date", state.meta.date || ""],
+    ["Report generated", dateStamp()],
+    [],
+    ["Overall compliance", overall.assessed ? overall.pct + "%" : "N/A"],
+    ["Requirements assessed", overall.assessed + " / " + overall.total],
+    ["Open gaps (non-compliant + partial)", overall.counts["non-compliant"] + overall.counts["partial"]],
+    [],
+    ["Framework", "Compliance %", "Compliant", "Partial", "Non-compliant", "Not applicable", "Unassessed"]
+  ];
+  active.forEach(fw => {
+    const s = computeStats(fw);
+    summaryRows.push([FRAMEWORKS[fw].label, s.assessed ? s.pct + "%" : "N/A",
+      s.counts.compliant, s.counts.partial, s.counts["non-compliant"], s.counts.na, s.counts.unassessed]);
+  });
+  const summarySheet = XLSX.utils.aoa_to_sheet(summaryRows);
+  summarySheet["!cols"] = [{ wch: 30 }, { wch: 16 }, { wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 14 }, { wch: 12 }];
+  XLSX.utils.book_append_sheet(wb, summarySheet, "Summary");
+
+  // --- One sheet per active framework ---
+  active.forEach(fw => {
+    const rows = [["Ref", "Requirement", "Description", "Status", "Evidence / Notes", "Gap Description", "Corrective Action", "Owner", "Target Date"]];
+    FRAMEWORKS[fw].requirements.forEach(r => {
+      const item = state.items[fw + ":" + r[0]];
+      rows.push([r[0], r[1], r[2], STATUS_LABELS[item.status], item.evidence, item.gap, item.action, item.owner, item.targetDate]);
+    });
+    const sheet = XLSX.utils.aoa_to_sheet(rows);
+    sheet["!cols"] = [{ wch: 10 }, { wch: 26 }, { wch: 40 }, { wch: 14 }, { wch: 28 }, { wch: 28 }, { wch: 28 }, { wch: 14 }, { wch: 12 }];
+    XLSX.utils.book_append_sheet(wb, sheet, FRAMEWORKS[fw].label.slice(0, 31));
+  });
+
+  // --- Action plan sheet ---
+  const actionRows = [["Framework", "Ref", "Gap", "Action", "Owner", "Target Date", "Action Status", "Priority"]];
+  Object.values(state.items)
+    .filter(it => active.includes(it.framework) && (it.status === "non-compliant" || it.status === "partial"))
+    .forEach(it => {
+      actionRows.push([FRAMEWORKS[it.framework].label, it.ref, it.gap, it.action, it.owner, it.targetDate, it.actionStatus, it.priority]);
+    });
+  const actionSheet = XLSX.utils.aoa_to_sheet(actionRows);
+  actionSheet["!cols"] = [{ wch: 14 }, { wch: 10 }, { wch: 30 }, { wch: 30 }, { wch: 14 }, { wch: 12 }, { wch: 14 }, { wch: 10 }];
+  XLSX.utils.book_append_sheet(wb, actionSheet, "Action Plan");
+
+  XLSX.writeFile(wb, "hse-gap-analysis-" + dateStamp() + ".xlsx");
+}
+
+function exportWordReport() {
+  const active = getActiveFrameworks();
+  const overall = computeStats(null);
+
+  const statusBg = {
+    compliant: "#E4F1EC", partial: "#FBF1DC", "non-compliant": "#FBEAE3",
+    na: "#EEF0EF", unassessed: "#F6F6F5"
+  };
+
+  function tableFor(fw) {
+    let rows = `<tr>
+      <th style="width:8%">Ref</th><th style="width:18%">Requirement</th><th style="width:12%">Status</th>
+      <th style="width:16%">Evidence / Notes</th><th style="width:16%">Gap Description</th>
+      <th style="width:16%">Corrective Action</th><th style="width:8%">Owner</th><th style="width:8%">Target Date</th>
+    </tr>`;
+    FRAMEWORKS[fw].requirements.forEach(r => {
+      const item = state.items[fw + ":" + r[0]];
+      rows += `<tr style="background:${statusBg[item.status]}">
+        <td><b>${r[0]}</b></td>
+        <td><b>${escapeHTML(r[1])}</b><br><span style="font-size:8.5pt;color:#555">${escapeHTML(r[2])}</span></td>
+        <td>${STATUS_LABELS[item.status]}</td>
+        <td>${escapeHTML(item.evidence)}</td>
+        <td>${escapeHTML(item.gap)}</td>
+        <td>${escapeHTML(item.action)}</td>
+        <td>${escapeHTML(item.owner)}</td>
+        <td>${item.targetDate || ""}</td>
+      </tr>`;
+    });
+    return `<h2>${FRAMEWORKS[fw].label}</h2><table>${rows}</table>`;
+  }
+
+  let actionRows = `<tr>
+    <th style="width:12%">Framework</th><th style="width:8%">Ref</th><th style="width:22%">Gap</th>
+    <th style="width:22%">Action</th><th style="width:12%">Owner</th><th style="width:10%">Target Date</th>
+    <th style="width:9%">Status</th><th style="width:5%">Priority</th>
+  </tr>`;
+  const openItems = Object.values(state.items).filter(it => active.includes(it.framework) && (it.status === "non-compliant" || it.status === "partial"));
+  if (openItems.length === 0) {
+    actionRows += `<tr><td colspan="8" style="text-align:center;color:#888">No open gaps recorded.</td></tr>`;
+  } else {
+    openItems.forEach(it => {
+      actionRows += `<tr style="background:${statusBg[it.status]}">
+        <td>${FRAMEWORKS[it.framework].label}</td><td><b>${it.ref}</b></td>
+        <td>${escapeHTML(it.gap)}</td><td>${escapeHTML(it.action)}</td>
+        <td>${escapeHTML(it.owner)}</td><td>${it.targetDate || ""}</td>
+        <td>${it.actionStatus}</td><td>${it.priority}</td>
+      </tr>`;
+    });
+  }
+
+  const summaryTableRows = active.map(fw => {
+    const s = computeStats(fw);
+    return `<tr><td>${FRAMEWORKS[fw].label}</td><td>${s.assessed ? s.pct + "%" : "N/A"}</td>
+      <td>${s.counts.compliant}</td><td>${s.counts.partial}</td><td>${s.counts["non-compliant"]}</td>
+      <td>${s.counts.na}</td><td>${s.counts.unassessed}</td></tr>`;
+  }).join("");
+
+  const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+  <head>
+    <meta charset="utf-8">
+    <title>HSE Gap Analysis Report</title>
+    <!--[if gte mso 9]>
+    <xml><w:WordDocument><w:View>Print</w:View><w:Zoom>90</w:Zoom></w:WordDocument></xml>
+    <![endif]-->
+    <style>
+      body { font-family: Calibri, Arial, sans-serif; font-size: 10.5pt; color: #16232E; }
+      h1 { font-size: 20pt; color: #16232E; border-bottom: 3px solid #C1440E; padding-bottom: 8px; }
+      h2 { font-size: 14pt; color: #16232E; margin-top: 26px; border-bottom: 1px solid #ccc; padding-bottom: 4px; }
+      table { border-collapse: collapse; width: 100%; margin-bottom: 10px; }
+      th, td { border: 1px solid #999; padding: 5px 7px; font-size: 9pt; vertical-align: top; text-align: left; }
+      th { background: #16232E; color: #fff; }
+      .meta-table td { border: none; padding: 2px 6px 2px 0; }
+    </style>
+  </head>
+  <body>
+    <h1>HSE Gap Analysis Report</h1>
+    <table class="meta-table" style="width:auto;margin-bottom:18px;">
+      <tr><td><b>Project / Site:</b></td><td>${escapeHTML(state.meta.project) || "—"}</td></tr>
+      <tr><td><b>Assessor:</b></td><td>${escapeHTML(state.meta.assessor) || "—"}</td></tr>
+      <tr><td><b>Assessment date:</b></td><td>${state.meta.date || "—"}</td></tr>
+      <tr><td><b>Report generated:</b></td><td>${dateStamp()}</td></tr>
+      <tr><td><b>Overall compliance:</b></td><td>${overall.assessed ? overall.pct + "%" : "N/A"} (${overall.assessed} / ${overall.total} requirements assessed)</td></tr>
+    </table>
+
+    <h2>Summary by framework</h2>
+    <table>
+      <tr><th>Framework</th><th>Compliance %</th><th>Compliant</th><th>Partial</th><th>Non-compliant</th><th>N/A</th><th>Unassessed</th></tr>
+      ${summaryTableRows}
+    </table>
+
+    ${active.map(fw => tableFor(fw)).join("")}
+
+    <h2>Consolidated Action Plan</h2>
+    <table>${actionRows}</table>
+  </body>
+  </html>`;
+
+  downloadBlob(html, "hse-gap-analysis-" + dateStamp() + ".doc", "application/msword");
 }
 
 function exportGapCSV() {

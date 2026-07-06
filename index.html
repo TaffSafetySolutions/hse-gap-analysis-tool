@@ -8,6 +8,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Sans+Condensed:wght@500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
 <body>
 
@@ -162,6 +163,8 @@
   <div class="footer-inner">
     <div class="toolbar-buttons">
       <button id="btnExportJSON" class="btn">Export data (JSON)</button>
+      <button id="btnExportExcel" class="btn">Export Excel workbook (.xlsx)</button>
+      <button id="btnExportWord" class="btn">Export Word report (.doc)</button>
       <button id="btnExportCSVGaps" class="btn">Export gap register (CSV)</button>
       <button id="btnExportCSVActions" class="btn">Export action plan (CSV)</button>
       <label class="btn btn-file">Import data (JSON)
