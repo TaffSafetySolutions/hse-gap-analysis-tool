@@ -201,6 +201,33 @@ select {
   font-weight: 600;
 }
 
+.framework-toggle-block { margin-bottom: 20px; }
+.framework-toggle-hint {
+  font-size: 12px;
+  color: var(--steel-light);
+  margin: -6px 0 12px;
+}
+.framework-toggles { display: flex; flex-wrap: wrap; gap: 10px; }
+.framework-toggle {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  border: 1px solid var(--line-strong);
+  border-radius: 20px;
+  padding: 8px 16px;
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  background: var(--surface);
+  transition: background 0.15s, border-color 0.15s;
+}
+.framework-toggle:has(input:checked) {
+  background: var(--good-bg);
+  border-color: var(--good);
+  color: var(--good);
+}
+.framework-toggle input { accent-color: var(--good); width: 15px; height: 15px; cursor: pointer; }
+
 .gauge-row {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));

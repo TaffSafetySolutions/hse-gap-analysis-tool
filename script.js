@@ -101,7 +101,7 @@ const STATUS_COLORS = {
 let state = loadState();
 
 function defaultState() {
-  const s = { meta: { project: "", assessor: "", date: "" }, items: {} };
+  const s = { meta: { project: "", assessor: "", date: "", activeFrameworks: {} }, items: {} };
   Object.keys(FRAMEWORKS).forEach(fw => {
     FRAMEWORKS[fw].requirements.forEach(r => {
       const key = fw + ":" + r[0];
@@ -133,6 +133,15 @@ function loadState() {
   }
 }
 
+function getActiveFrameworksMap() {
+  return state.meta.activeFrameworks || {};
+}
+function getActiveFrameworks() {
+  const map = getActiveFrameworksMap();
+  // A framework is active unless explicitly switched off (undefined counts as active)
+  return Object.keys(FRAMEWORKS).filter(fw => map[fw] !== false);
+}
+
 function saveState() {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
@@ -157,6 +166,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
   Object.keys(FRAMEWORKS).forEach(fw => renderTable(fw));
   renderActionsTable();
+  renderFrameworkToggles();
+  updateTabVisibility();
   renderDashboard();
 
   document.querySelectorAll(".tab-btn").forEach(btn => {
@@ -177,6 +188,49 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("btnReset").addEventListener("click", resetAll);
   document.getElementById("importFile").addEventListener("change", handleImport);
 });
+
+function renderFrameworkToggles() {
+  const container = document.getElementById("frameworkToggles");
+  const activeMap = getActiveFrameworksMap();
+  container.innerHTML = Object.keys(FRAMEWORKS).map(fw => `
+    <label class="framework-toggle">
+      <input type="checkbox" data-fw="${fw}" ${activeMap[fw] !== false ? "checked" : ""}>
+      <span>${FRAMEWORKS[fw].label}</span>
+    </label>
+  `).join("");
+
+  container.querySelectorAll("input[type=checkbox]").forEach(cb => {
+    cb.addEventListener("change", e => {
+      const fw = e.target.dataset.fw;
+      if (!state.meta.activeFrameworks) state.meta.activeFrameworks = {};
+      state.meta.activeFrameworks[fw] = e.target.checked;
+
+      const stillHasActive = getActiveFrameworks().length > 0;
+      if (!stillHasActive) {
+        e.target.checked = true;
+        state.meta.activeFrameworks[fw] = true;
+        alert("At least one framework needs to stay selected.");
+      }
+      saveState();
+      updateTabVisibility();
+      renderDashboard();
+    });
+  });
+}
+
+function updateTabVisibility() {
+  const active = getActiveFrameworks();
+  let activeTabWasHidden = false;
+  document.querySelectorAll(".tab-btn").forEach(btn => {
+    const tab = btn.dataset.tab;
+    if (FRAMEWORKS[tab]) {
+      const show = active.includes(tab);
+      btn.style.display = show ? "" : "none";
+      if (!show && btn.classList.contains("active")) activeTabWasHidden = true;
+    }
+  });
+  if (activeTabWasHidden) switchTab("dashboard");
+}
 
 function switchTab(tab) {
   document.querySelectorAll(".tab-btn").forEach(b => b.classList.toggle("active", b.dataset.tab === tab));
@@ -257,7 +311,9 @@ function renderActionsTable(filter) {
   const table = document.getElementById("table-actions");
   const today = new Date().toISOString().slice(0,10);
 
+  const active = getActiveFrameworks();
   let rows = Object.values(state.items).filter(it =>
+    active.includes(it.framework) &&
     (it.status === "non-compliant" || it.status === "partial") && (it.action || it.gap)
   );
   if (filter) rows = rows.filter(it => it.actionStatus === filter);
@@ -320,7 +376,8 @@ function renderActionsTable(filter) {
 
 /* ---------------- DASHBOARD ---------------- */
 function computeStats(fw) {
-  const items = Object.values(state.items).filter(it => !fw || it.framework === fw);
+  const active = getActiveFrameworks();
+  const items = Object.values(state.items).filter(it => fw ? it.framework === fw : active.includes(it.framework));
   const scored = items.filter(it => it.status !== "na" && it.status !== "unassessed");
   const compliantWeight = scored.reduce((sum, it) => {
     if (it.status === "compliant") return sum + 1;
@@ -340,8 +397,10 @@ function renderDashboard() {
   document.getElementById("statAssessed").textContent = overall.assessed + " / " + overall.total;
   document.getElementById("statGaps").textContent = overall.counts["non-compliant"] + overall.counts["partial"];
 
+  const active = getActiveFrameworks();
   const today = new Date().toISOString().slice(0,10);
   const overdue = Object.values(state.items).filter(it =>
+    active.includes(it.framework) &&
     (it.status === "non-compliant" || it.status === "partial") &&
     it.targetDate && it.targetDate < today && it.actionStatus !== "closed"
   ).length;
@@ -349,7 +408,7 @@ function renderDashboard() {
 
   const gaugeRow = document.getElementById("gaugeRow");
   gaugeRow.innerHTML = "";
-  Object.keys(FRAMEWORKS).forEach(fw => {
+  active.forEach(fw => {
     const s = computeStats(fw);
     gaugeRow.appendChild(buildGaugeCard(FRAMEWORKS[fw].label, s.pct, s.assessed));
   });
@@ -369,7 +428,7 @@ function renderDashboard() {
   const priorityBox = document.getElementById("priorityGaps");
   const priorityOrder = { high: 0, medium: 1, low: 2 };
   const openGaps = Object.values(state.items)
-    .filter(it => it.status === "non-compliant" || it.status === "partial")
+    .filter(it => active.includes(it.framework) && (it.status === "non-compliant" || it.status === "partial"))
     .sort((a,b) => (priorityOrder[a.priority]??1) - (priorityOrder[b.priority]??1))
     .slice(0, 8);
 
@@ -466,6 +525,8 @@ function handleImport(e) {
       document.getElementById("assessmentDate").value = state.meta.date || "";
       Object.keys(FRAMEWORKS).forEach(fw => renderTable(fw));
       renderActionsTable();
+      renderFrameworkToggles();
+      updateTabVisibility();
       renderDashboard();
       alert("Data imported successfully.");
     } catch (err) {
@@ -485,5 +546,7 @@ function resetAll() {
   document.getElementById("assessmentDate").value = "";
   Object.keys(FRAMEWORKS).forEach(fw => renderTable(fw));
   renderActionsTable();
+  renderFrameworkToggles();
+  updateTabVisibility();
   renderDashboard();
 }
